@@ -10,6 +10,7 @@ int main(int argc, char **argv)
   QGLFormat::setDefaultFormat(fmt); 
   
   CGLWidget *widget = new CGLWidget;
+  widget->loadMeshFromNetCDF(argv[1]);
   widget->show();
   
   return app.exec();
