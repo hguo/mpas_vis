@@ -33,9 +33,13 @@ private:
   const QVector3D eye, center, up;
 
 protected:
-  size_t nCells, nEdges, nVertices;
-  double *latVertex, *lonVertex, *xVertex, *yVertex, *zVertex;
   const double radius = 6371220.;
+  
+  size_t nCells, nEdges, nVertices, nVertLevels;
+  std::vector<double> latVertex, lonVertex, xVertex, yVertex, zVertex;
+  std::vector<double> xCell, yCell, zCell;
+  std::vector<int> indexToVertexID, verticesOnEdge;
+  std::vector<double> velocityX, velocityY, velocityZ;
 };
 
 #endif
