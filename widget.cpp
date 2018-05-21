@@ -3,6 +3,126 @@
 #include <cfloat>
 #include <netcdf.h>
 
+void qglByteSwapImage(QImage& img, GLuint pixelType)
+{
+  const int width  = img.width(); 
+  const int height = img.height(); 
+  
+  if (pixelType == GL_UNSIGNED_INT_8_8_8_8_REV || 
+    (pixelType == GL_UNSIGNED_BYTE && QSysInfo::ByteOrder == QSysInfo::LittleEndian)) {
+    for (int i=0; i<height; ++i) {
+      uint *p = (uint*) img.scanLine(i); 
+      for (int x=0; x<width; ++x) 
+        p[x] = ((p[x] << 16) & 0xff0000) | ((p[x] >> 16) & 0xff) | (p[x] & 0xff00ff00); 
+    }
+  } else {
+    for (int i=0; i<height; ++i) {
+      uint *p = (uint*) img.scanLine(i); 
+      for (int x=0; x<width; ++x) 
+        p[x] = (p[x] << 8) | ((p[x] >> 24) & 0xff); 
+    }
+  }
+}
+
+GLuint qglGenTexture(const QImage& image, GLenum target, GLint internalFormat, QGLContext::BindOptions options)
+{
+  if (!glewIsSupported("GL_ARB_texture_non_power_of_two"))
+      assert(0); // TODO: scale the image to power-of-two
+
+  GLuint tex; 
+  GLuint filtering = options & QGLContext::LinearFilteringBindOption ? GL_LINEAR : GL_NEAREST; 
+
+  QImage img = image; 
+
+  glGenTextures(1, &tex); 
+  glBindTexture(target, tex); 
+  glTexParameterf(target, GL_TEXTURE_MAG_FILTER, filtering); 
+
+  if (options & QGLContext::MipmapBindOption && glewIsSupported("GL_SGIS_generate_mipmap")) {
+    glHint(GL_GENERATE_MIPMAP_HINT_SGIS, GL_NICEST); 
+    glTexParameteri(target, GL_GENERATE_MIPMAP_SGIS, GL_TRUE); 
+    glTexParameterf(target, GL_TEXTURE_MIN_FILTER, 
+          options & QGLContext::LinearFilteringBindOption ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST); 
+  } else 
+    glTexParameterf(target, GL_TEXTURE_MIN_FILTER, filtering); 
+
+  QImage::Format imgfmt = img.format(); 
+  bool premul = options & QGLContext::PremultipliedAlphaBindOption; 
+  GLenum externalFormat; 
+  GLuint pixelType; 
+
+  if (glewIsSupported("GL_EXT_bgra")) {
+    externalFormat = GL_BGRA; 
+    if (QGLFormat::openGLVersionFlags() & QGLFormat::OpenGL_Version_1_2) 
+      pixelType = GL_UNSIGNED_INT_8_8_8_8_REV; 
+    else 
+      pixelType = GL_UNSIGNED_BYTE; 
+  } else {
+    externalFormat = GL_RGBA; 
+    pixelType = GL_UNSIGNED_BYTE; 
+  }
+
+  switch (imgfmt) {
+  case QImage::Format_ARGB32: 
+    if (premul) 
+      img = img.convertToFormat( imgfmt = QImage::Format_ARGB32_Premultiplied ); 
+    break; 
+
+  case QImage::Format_ARGB32_Premultiplied:
+    if (!premul)
+      img = img.convertToFormat( imgfmt = QImage::Format_ARGB32 ); 
+    break; 
+
+  case QImage::Format_RGB16:
+    pixelType = GL_UNSIGNED_SHORT_5_6_5; 
+    externalFormat = GL_RGB; 
+    internalFormat = GL_RGB; 
+    break; 
+
+  case QImage::Format_RGB32: 
+    break; 
+
+  default:
+    if (img.hasAlphaChannel())
+      img.convertToFormat(premul ? 
+            QImage::Format_ARGB32_Premultiplied : 
+            QImage::Format_ARGB32); 
+    else 
+      img.convertToFormat(QImage::Format_RGB32); 
+  }
+
+  if (options & QGLContext::InvertedYBindOption) {
+    if (img.isDetached()) {
+      int ipl = img.bytesPerLine() / 4; 
+      int h = img.height(); 
+      for (int y=0; y<h/2; ++y) {
+        int *a = (int*) img.scanLine(y); 
+        int *b = (int*) img.scanLine(h-y-1); 
+        for (int x=0; x<ipl; ++x) 
+          qSwap(a[x], b[x]); 
+      } 
+    } else 
+      img = img.mirrored(); 
+  }
+
+  if (externalFormat == GL_RGBA) {
+    assert(img.depth() == 32); 
+    qglByteSwapImage(img, pixelType); 
+  }
+
+  const QImage &constRef = img; 
+  glTexImage2D(target, 0, internalFormat, img.width(), img.height(), 0, externalFormat,
+               pixelType, constRef.bits()); 
+
+#ifndef QT_NO_DEBUG
+  GLenum error = glGetError(); 
+  if (error != GL_NO_ERROR)
+    qWarning(" - texture upload failed, errcode 0x%x, enum: %d (%x)\n", error, target, target); 
+#endif
+
+  return tex; 
+}
+
 template <typename T>
 static inline void cross_product(const T A[3], const T B[3], T C[3])
 {
@@ -185,13 +305,15 @@ void CGLWidget::loadMeshFromNetCDF(const std::string& filename)
   // }
 
 
-#if 0
+#if 1
   double xmin = DBL_MAX, xmax = -DBL_MAX, 
          ymin = DBL_MAX, ymax = -DBL_MAX,
-         zmin = DBL_MAX, zmax = -DBL_MAX;
+         zmin = DBL_MAX, zmax = -DBL_MAX, 
+         latmin = DBL_MAX, latmax = -DBL_MAX, 
+         lonmin = DBL_MAX, lonmax = -DBL_MAX;
 
   for (int i=0; i<nVertices; i++) {
-    fprintf(stderr, "lon=%f, lat=%f, x=%f, y=%f, z=%f\n", lonVertex[i], latVertex[i], xVertex[i], yVertex[i], zVertex[i]);
+    // fprintf(stderr, "lon=%f, lat=%f, x=%f, y=%f, z=%f\n", lonVertex[i], latVertex[i], xVertex[i], yVertex[i], zVertex[i]);
 
     xmin = std::min(xmin, xVertex[i]);
     xmax = std::max(xmax, xVertex[i]);
@@ -199,15 +321,42 @@ void CGLWidget::loadMeshFromNetCDF(const std::string& filename)
     ymax = std::max(ymax, yVertex[i]);
     zmin = std::min(zmin, zVertex[i]);
     zmax = std::max(zmax, zVertex[i]);
+    latmin = std::min(latmin, latVertex[i]); 
+    latmax = std::max(latmax, latVertex[i]);
+    lonmin = std::min(lonmin, lonVertex[i]); 
+    lonmax = std::max(lonmax, lonVertex[i]);
   }
 
-  fprintf(stderr, "%f, %f, %f, %f, %f, %f\n", xmin, xmax, ymin, ymax, zmin, zmax);
+  fprintf(stderr, "%f, %f, %f, %f, %f, %f, latmin=%f, latmax=%f, lonmin=%f, lonmax=%f\n", 
+      xmin, xmax, ymin, ymax, zmin, zmax, latmin, latmax, lonmin, lonmax);
 #endif
 }
 
 void CGLWidget::initializeGL()
 {
+  glewInit();
+
   trackball.init();
+
+  sphere = gluNewQuadric();
+  gluQuadricDrawStyle(sphere, GLU_FILL);
+  gluQuadricTexture(sphere, TRUE);
+  gluQuadricNormals(sphere, GLU_SMOOTH);
+    
+  glEnable(GL_POLYGON_OFFSET_FILL); 
+  glPolygonOffset(1, 1);
+    
+  // earth texture
+  QImage earthImage("./earth4096.jpg");
+  texEarth = qglGenTexture(
+                      earthImage, 
+                      GL_TEXTURE_2D, 
+                      GL_RGB, 
+                      QGLContext::DefaultBindOption | QGLContext::MipmapBindOption); 
+
+  glEnable(GL_DEPTH_TEST);
+
+  CHECK_GLERROR();
 }
 
 void CGLWidget::resizeGL(int w, int h)
@@ -237,7 +386,24 @@ void CGLWidget::paintGL()
   glLoadIdentity(); 
   glLoadMatrixd(mvmatrix.data()); 
 
-  glColor3f(0, 0, 0);
+  if (sphere != NULL) {
+    glColor4f(1, 1, 1, 1);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texEarth);
+ 
+    glCullFace(GL_BACK);
+    glEnable(GL_CULL_FACE);
+
+    glPushMatrix();
+    glRotatef(-90, 0, 0, 1);
+    gluSphere(sphere, 1.0, 72, 60);
+    glPopMatrix();
+
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_TEXTURE_2D);
+  }
+  
+  glColor3f(1, 1, 0);
   glPointSize(2.0);
   
 #if 1 // vertex velocities

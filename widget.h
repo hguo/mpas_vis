@@ -2,7 +2,9 @@
 #define _WIDGET_H
 
 #include "def.h"
+#include <GL/glew.h>
 #include <QGLWidget>
+#include <OpenGL/glu.h>
 #include <QMouseEvent>
 #include "trackball.h"
 
@@ -44,6 +46,9 @@ protected:
   std::vector<double> velocityXv, velocityYv, velocityZv;
 
   std::map<int, int> vertexIndex, cellIndex;
+
+  GLUquadricObj *sphere = NULL;
+  GLuint texEarth = 0;
 };
 
 #endif
