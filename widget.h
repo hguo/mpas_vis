@@ -38,8 +38,12 @@ protected:
   size_t nCells, nEdges, nVertices, nVertLevels;
   std::vector<double> latVertex, lonVertex, xVertex, yVertex, zVertex;
   std::vector<double> xCell, yCell, zCell;
-  std::vector<int> indexToVertexID, verticesOnEdge;
+  std::vector<int> indexToVertexID, indexToCellID;
+  std::vector<int> verticesOnEdge, cellsOnVertex;
   std::vector<double> velocityX, velocityY, velocityZ;
+  std::vector<double> velocityXv, velocityYv, velocityZv;
+
+  std::map<int, int> vertexIndex, cellIndex;
 };
 
 #endif
