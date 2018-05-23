@@ -17,6 +17,17 @@ public:
 
   void loadMeshFromNetCDF(const std::string& filename);
 
+public:
+  struct kdnode {
+    double lo_val, hi_val;
+    int split_dir;
+    kdnode *l=NULL, *r=NULL;
+    int cellId = -1;
+  };
+
+  void buildKDTree();
+  void buildKDTreeRecursively(kdnode*, std::vector<int>&, int dir);
+
 protected:
   void initializeGL();
   void resizeGL(int w, int h);
@@ -39,7 +50,7 @@ protected:
   
   size_t nCells, nEdges, nVertices, nVertLevels;
   std::vector<double> latVertex, lonVertex, xVertex, yVertex, zVertex;
-  std::vector<double> xCell, yCell, zCell;
+  std::vector<double> xyzCell; // xCell, yCell, zCell;
   std::vector<int> indexToVertexID, indexToCellID;
   std::vector<int> verticesOnEdge, cellsOnVertex;
   std::vector<double> velocityX, velocityY, velocityZ;

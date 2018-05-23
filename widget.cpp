@@ -48,6 +48,41 @@ CGLWidget::~CGLWidget()
 {
 }
 
+void CGLWidget::buildKDTree()
+{
+  std::vector<int> cells(nCells);
+  for (int i=0; i<nCells; i++) cells[i] = i;
+
+  kdnode *root = new kdnode; 
+
+  buildKDTreeRecursively(root, cells, 0);
+}
+
+void CGLWidget::buildKDTreeRecursively(kdnode *node, std::vector<int>& cells, int dir)
+{
+  const size_t size = cells.size();
+  const size_t half_size = size / 2;
+
+  if (size > 1) {
+    std::stable_sort(cells.begin(), cells.end(), [this, dir](int c0, int c1) {return xyzCell[c0*3+dir] < xyzCell[c1*3+dir];});
+
+    node->lo_val = xyzCell[cells.front()*3+dir];
+    node->hi_val = xyzCell[cells.back()*3+dir];
+
+    node->l = new kdnode;
+    node->r = new kdnode;
+
+    std::vector<int> lo(cells.begin(), cells.begin() + half_size);
+    std::vector<int> hi(cells.begin() + half_size, cells.end());
+
+    buildKDTreeRecursively(node->l, lo, (dir+1)%3);
+    buildKDTreeRecursively(node->r, hi, (dir+1)%3);
+  } else {
+    node->cellId = cells[0];
+    // TODO
+  }
+}
+
 void CGLWidget::loadMeshFromNetCDF(const std::string& filename)
 {
   int ncid;
@@ -89,21 +124,23 @@ void CGLWidget::loadMeshFromNetCDF(const std::string& filename)
   NC_SAFE_CALL( nc_inq_varid(ncid, "velocityZ", &varid_velocityZ) );
 
   const size_t start_cells[1] = {0}, size_cells[1] = {nCells};
-  xCell.resize(nCells);
-  yCell.resize(nCells);
-  zCell.resize(nCells);
-  indexToCellID.resize(nCells);
 
+  indexToCellID.resize(nCells);
   NC_SAFE_CALL( nc_get_vara_int(ncid, varid_indexToCellID, start_cells, size_cells, &indexToCellID[0]) );
-  NC_SAFE_CALL( nc_get_vara_double(ncid, varid_xCell, start_cells, size_cells, &xCell[0]) );
-  NC_SAFE_CALL( nc_get_vara_double(ncid, varid_yCell, start_cells, size_cells, &yCell[0]) );
-  NC_SAFE_CALL( nc_get_vara_double(ncid, varid_zCell, start_cells, size_cells, &zCell[0]) );
-  
   for (int i=0; i<nCells; i++) {
     cellIndex[indexToCellID[i]] = i;
     // fprintf(stderr, "%d, %d\n", i, indexToCellID[i]);
   }
 
+  std::vector<double> coord_cells;
+  coord_cells.resize(nCells);
+  xyzCell.resize(nCells*3);
+  NC_SAFE_CALL( nc_get_vara_double(ncid, varid_xCell, start_cells, size_cells, &coord_cells[0]) );
+  for (int i=0; i<nCells; i++) xyzCell[i*3] = coord_cells[i];
+  NC_SAFE_CALL( nc_get_vara_double(ncid, varid_yCell, start_cells, size_cells, &coord_cells[0]) );
+  for (int i=0; i<nCells; i++) xyzCell[i*3+1] = coord_cells[i];
+  NC_SAFE_CALL( nc_get_vara_double(ncid, varid_zCell, start_cells, size_cells, &coord_cells[0]) );
+  for (int i=0; i<nCells; i++) xyzCell[i*3+2] = coord_cells[i];
 
   const size_t start_vertices[1] = {0}, size_vertices[1] = {nVertices};
   latVertex.resize(nVertices);
@@ -157,15 +194,15 @@ void CGLWidget::loadMeshFromNetCDF(const std::string& filename)
   velocityXv.resize(nVertices*nVertLevels);
   velocityYv.resize(nVertices*nVertLevels);
   velocityZv.resize(nVertices*nVertLevels);
-
+  
   for (int i=0; i<nVertices; i++) {
     if (cellsOnVertex[i*3] == 0 || cellsOnVertex[i*3+1] == 0 || cellsOnVertex[i*3+2] == 0) continue; // on boundary
     int c0 = cellIndex[cellsOnVertex[i*3]], c1 = cellIndex[cellsOnVertex[i*3+1]], c2 = cellIndex[cellsOnVertex[i*3+2]];
 
     double X[3][3] = {
-      {xCell[c0], yCell[c0], zCell[c0]}, 
-      {xCell[c1], yCell[c1], zCell[c1]}, 
-      {xCell[c2], yCell[c2], zCell[c2]}, 
+      {xyzCell[c0*3], xyzCell[c0*3+1], xyzCell[c0*3+2]}, 
+      {xyzCell[c1*3], xyzCell[c1*3+1], xyzCell[c1*3+2]}, 
+      {xyzCell[c2*3], xyzCell[c2*3+1], xyzCell[c2*3+2]}, 
     };
 
     double P[3] = {xVertex[i], yVertex[i], zVertex[i]};
@@ -179,7 +216,7 @@ void CGLWidget::loadMeshFromNetCDF(const std::string& filename)
 
     // fprintf(stderr, "vertex %d: %f, %f, %f\n", i, lambda[0], lambda[1], lambda[2]);
   }
-
+  
   // for (int i=0; i<nVertices; i++) {
   //   fprintf(stderr, "%d, %d, %d\n", cellsOnVertex[i*3], cellsOnVertex[i*3+1], cellsOnVertex[i*3+2]);
   // }
@@ -265,6 +302,7 @@ void CGLWidget::paintGL()
       QImage earthImage("./water_8k.png");
       texEarth = bindTexture(earthImage); 
     }
+    // fprintf(stderr, "%d\n", texEarth);
 
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texEarth);
@@ -304,7 +342,7 @@ void CGLWidget::paintGL()
 
 #if 1 // cell center velocities
   for (int i=0; i<nCells; i++) {
-    const double x = xCell[i] / radius, y = yCell[i] / radius, z = zCell[i] / radius;
+    const double x = xyzCell[i*3] / radius, y = xyzCell[i*3+1] / radius, z = xyzCell[i*3+2] / radius;
     const double vx = velocityX[i], vy = velocityY[i], vz = velocityZ[i];
     const double alpha = 0.01;
 

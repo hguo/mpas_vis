@@ -11,6 +11,7 @@ int main(int argc, char **argv)
   
   CGLWidget *widget = new CGLWidget;
   widget->loadMeshFromNetCDF(argv[1]);
+  widget->buildKDTree();
   widget->show();
   
   return app.exec();
